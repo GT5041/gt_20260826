@@ -1,0 +1,2 @@
+anthropic>=0.40.0  # ①④ を --live で実際のAPIで動かす場合に必要(オフライン実行では不要)
+jsonschema>=4.0.0  # ④ の JSON Schema バリデーションに必要
