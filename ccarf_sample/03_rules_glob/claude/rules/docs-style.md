@@ -1,6 +1,6 @@
 ---
 description: ドキュメント執筆ルール
-globs:
+paths:
   - "**/*.md"
   - "**/*.mdx"
 alwaysApply: false

@@ -17,6 +17,8 @@ CASES: list[dict] = [
     {"tool_name": "Read", "tool_input": {"file_path": "src/app.py"}},
     {"tool_name": "Read", "tool_input": {"file_path": "/home/user/.env"}},
     {"tool_name": "Write", "tool_input": {"file_path": "~/.ssh/id_rsa"}},
+    {"tool_name": "process_refund", "tool_input": {"amount": 200, "order_id": "A-1"}},
+    {"tool_name": "process_refund", "tool_input": {"amount": 800, "order_id": "A-2"}},
 ]
 
 
@@ -36,11 +38,11 @@ def main() -> None:
             print(f"  stdout: {proc.stdout.strip()}")
         print(f"  => {decision}\n")
 
-        # "rm -rf" や "sudo" や機密ファイルを含むケースは DENY、それ以外は ALLOW を期待
-        should_deny = any(
-            p in case["tool_input"].get("command", "") for p in ["rm -rf /", "sudo "]
-        ) or any(
-            f in case["tool_input"].get("file_path", "") for f in [".env", "id_rsa"]
+        # "rm -rf" や "sudo" や機密ファイル、$500超の返金を含むケースは DENY、それ以外は ALLOW を期待
+        should_deny = (
+            any(p in case["tool_input"].get("command", "") for p in ["rm -rf /", "sudo "])
+            or any(f in case["tool_input"].get("file_path", "") for f in [".env", "id_rsa"])
+            or (case["tool_name"] == "process_refund" and case["tool_input"].get("amount", 0) > 500)
         )
         if should_deny != (decision == "DENY"):
             print(f"  !! 期待と異なる結果です (期待: {'DENY' if should_deny else 'ALLOW'})")

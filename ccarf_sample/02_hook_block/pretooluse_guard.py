@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Claude Code の PreToolUse フックとして動作する「遮断」サンプル。
+"""Claude Code / Claude Agent SDK の PreToolUse フックとして動作する「遮断」サンプル。
+
+CCAR-F (Claude Certification Program: Architect Foundations) の
+Task Statement 1.5「Apply Agent SDK hooks for tool call interception and
+data normalization」と Task Statement 1.4「Implement multi-step workflows
+with enforcement and handoff patterns」に対応する。
 
 Claude Code はツールを実行する直前に、settings.json の
 ``hooks.PreToolUse`` に登録されたコマンドへツール呼び出しの情報を
@@ -13,18 +18,25 @@ JSON として標準入力(stdin)に渡して実行する。
       ...
     }
 
-危険なパターンにマッチした場合、標準出力に
+危険なパターン/ビジネスルール違反にマッチした場合、標準出力に
 ``hookSpecificOutput.permissionDecision = "deny"`` を含む JSON を返す。
 これを見た Claude Code はツールの実行を遮断し、
 ``permissionDecisionReason`` の内容を Claude 自身にも伝える。
 
 何も出力せず終了コード 0 で終われば「許可(allow)」として扱われる。
+
+このデモには2種類の遮断ルールを用意している:
+  1. 安全ガード: 危険な Bash コマンド / 機密ファイルへのアクセスを遮断
+  2. ビジネスルール強制: 試験ガイドの例(「$500を超える返金操作を遮断し、
+     人間へのエスカレーションへリダイレクトする」)を再現した
+     process_refund ツールの閾値チェック。プロンプトの指示だけに頼らず、
+     hook で「決定論的に」ルールを強制する点がポイント。
 """
 import json
 import sys
 
-# 遮断したいコマンドパターン(デモ用。実運用ではより網羅的な検査が必要)
-DENY_PATTERNS = [
+# 遮断したい Bash コマンドパターン(デモ用。実運用ではより網羅的な検査が必要)
+DENY_COMMAND_PATTERNS = [
     "rm -rf /",
     "sudo ",
     ":(){:|:&};:",  # fork bomb
@@ -38,6 +50,9 @@ DENY_FILE_FRAGMENTS = [
     "id_rsa",
     "credentials.json",
 ]
+
+# ビジネスルール: この金額を超える返金は自動承認せず、人間にエスカレーションする
+REFUND_THRESHOLD = 500
 
 
 def deny(reason: str) -> None:
@@ -64,7 +79,7 @@ def main() -> None:
 
     if tool_name == "Bash":
         command = tool_input.get("command", "")
-        for pattern in DENY_PATTERNS:
+        for pattern in DENY_COMMAND_PATTERNS:
             if pattern in command:
                 deny(f"危険なコマンドパターンを検出したため遮断しました: '{pattern}'")
 
@@ -73,6 +88,14 @@ def main() -> None:
         for fragment in DENY_FILE_FRAGMENTS:
             if fragment in file_path:
                 deny(f"機密ファイルへのアクセスと判断し遮断しました: '{fragment}' を含むパス")
+
+    if tool_name == "process_refund":
+        amount = tool_input.get("amount", 0)
+        if amount > REFUND_THRESHOLD:
+            deny(
+                f"返金額 ${amount} が閾値 ${REFUND_THRESHOLD} を超えているため、"
+                "自動実行を遮断し人間のエスカレーションへリダイレクトします。"
+            )
 
     # マッチしなければ何も出力せず正常終了 -> 許可
     sys.exit(0)

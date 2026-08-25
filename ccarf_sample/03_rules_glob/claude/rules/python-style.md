@@ -1,6 +1,6 @@
 ---
 description: Python コーディング規約
-globs:
+paths:
   - "**/*.py"
 alwaysApply: false
 ---

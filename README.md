@@ -2,17 +2,18 @@
 
 for test
 
-## CCAR-F 試験対策サンプルプログラム
+## CCAR-F (Claude Certification Program: Architect Foundations) 試験対策サンプルプログラム
 
-`ccarf_sample/` 配下に、以下4つの機能・動作を確認できる独立したサンプルプログラムを用意しています。
+`ccarf_sample/` 配下に、添付の Exam Guide 第6章「Detailed Objectives by Domain」に
+対応する以下4つの機能・動作を確認できる独立したサンプルプログラムを用意しています。
 すべて Python 3.10+ で動作し、①③④は API キー無しでもオフラインで実行できます。
 
-| # | 機能 | ディレクトリ |
-|---|------|-------------|
-| ① | stop_reason のループ(エージェントループ) | `ccarf_sample/01_stop_reason_loop/` |
-| ② | フックによる遮断(PreToolUse hook) | `ccarf_sample/02_hook_block/` |
-| ③ | `claude/rules/` のグロブによるルール適用判定 | `ccarf_sample/03_rules_glob/` |
-| ④ | tool_use + JSON スキーマ | `ccarf_sample/04_tool_use_schema/` |
+| # | 機能 | 対応する Task Statement | ディレクトリ |
+|---|------|------------------------|-------------|
+| ① | stop_reason のループ(エージェントループ) | 1.1(Domain 1) | `ccarf_sample/01_stop_reason_loop/` |
+| ② | フックによる遮断(PreToolUse hook) | 1.4, 1.5(Domain 1) | `ccarf_sample/02_hook_block/` |
+| ③ | `claude/rules/` の glob(`paths`フロントマター) | 3.3(Domain 3) | `ccarf_sample/03_rules_glob/` |
+| ④ | tool_use + JSON スキーマ | 4.3, 4.4(Domain 4) | `ccarf_sample/04_tool_use_schema/` |
 
 ### セットアップ
 
@@ -30,6 +31,7 @@ pip install -r requirements.txt
 ### ① stop_reason のループの確かめ方
 
 対象: `ccarf_sample/01_stop_reason_loop/agent_loop.py`
+対応: **Task Statement 1.1**「Design and implement agentic loops for autonomous task execution」
 
 LLM の応答には `stop_reason` というフィールドがあり、呼び出し側はこれを見て
 「ツールを実行してもう一度呼ぶ」か「会話を終える」かを判断します。
@@ -45,9 +47,15 @@ python3 01_stop_reason_loop/agent_loop.py
   `tool_use: add(**{...})` の行から確認できます。
 - `stop_reason='end_turn'` になった時点でループが止まり、`最終回答:` が出力されて
   プログラムが終了することを確認してください。
-- コード内 `run_agent_loop()` の `MAX_ITERATIONS = 10` が「無限ループ防止のガード」に
-  なっている点も確認してください(stop_reason が永遠に `tool_use` を返すような
-  異常系でも、10回で強制的に例外を投げて止まります)。
+- **試験で問われるアンチパターンの回避**を確認してください(`agent_loop.py` の
+  `run_agent_loop()` のコメント参照)。試験ガイドは以下を明示的にアンチパターンとして
+  挙げています:
+  1. 自然言語のテキストを解析してループ終了を判断すること
+  2. イテレーション回数の上限を「主たる」停止判断に使うこと
+  3. アシスタントの text コンテンツの有無を完了判定に使うこと
+  このサンプルは `stop_reason` のみで継続/終了を判断しており、`MAX_ITERATIONS = 10`
+  はあくまで異常系(stop_reasonが永遠にtool_useを返す等)向けの安全弁であって、
+  主たる停止機構ではないことがコードから読み取れます。
 - `--live` オプション + `ANTHROPIC_API_KEY` 環境変数があれば、実際の Claude API でも
   同じロジックが動くことを確認できます:
   ```bash
@@ -60,9 +68,21 @@ python3 01_stop_reason_loop/agent_loop.py
 ### ② フックによる遮断の確かめ方
 
 対象: `ccarf_sample/02_hook_block/`
+対応: **Task Statement 1.5**「Apply Agent SDK hooks for tool call interception and data normalization」、
+**Task Statement 1.4**「Implement multi-step workflows with enforcement and handoff patterns」
 
-Claude Code はツール実行の直前に `PreToolUse` フックへツール呼び出し情報を JSON で渡し、
-フック側が `permissionDecision: "deny"` を返すと実行を遮断できます。
+Claude Code / Claude Agent SDK はツール実行の直前に `PreToolUse` フックへツール呼び出し情報を
+JSON で渡し、フック側が `permissionDecision: "deny"` を返すと実行を遮断できます。
+プロンプトの指示だけに頼る「確率的な遵守」ではなく、hook による「決定論的な強制」が
+ビジネスルール(例: 一定額を超える返金は必ず人間の承認を必要とする)に適している、
+というのが試験ガイドの主張です。
+
+このサンプルには2系統の遮断ルールがあります:
+- 安全ガード: 危険な Bash コマンド(`rm -rf /` 等)や機密ファイル(`.env`, `id_rsa`)への
+  アクセスを遮断
+- **ビジネスルール強制**: 試験ガイドの例そのもの(「$500を超える返金操作を遮断し、
+  人間へのエスカレーションへリダイレクトする」)を再現した `process_refund` ツールの
+  閾値チェック
 
 **確認方法A: ローカルでフックのロジックだけを検証(Claude Code不要)**
 
@@ -74,6 +94,9 @@ python3 02_hook_block/test_hook_locally.py
 - `rm -rf /` や `sudo ...` のような危険なコマンドは `=> DENY` になり、
   `permissionDecision: "deny"` を含む JSON が標準出力に出ること
 - `.env` や `id_rsa` を含むパスへの `Read`/`Write` も `=> DENY` になること
+- `process_refund` ツールが `amount: 200` のときは `=> ALLOW`、`amount: 800`
+  (閾値$500超)のときは `=> DENY` になり、`permissionDecisionReason` に
+  「人間のエスカレーションへリダイレクトします」という理由が入ること
 - 最後に全ケースの期待値と実際の結果が一致し、終了コード 0 でプログラムが終わること
   (`echo $?` で確認可能)
 
@@ -90,51 +113,62 @@ python3 02_hook_block/test_hook_locally.py
 
 ---
 
-### ③ `claude/rules/` のグロブの確かめ方
+### ③ `claude/rules/` の glob の確かめ方
 
 対象: `ccarf_sample/03_rules_glob/`
+対応: **Task Statement 3.3**「Apply path-specific rules for conditional convention loading」
 
-`claude/rules/*.md` に、フロントマターで `globs`(適用対象パターン)と
-`alwaysApply`(常時適用フラグ)を指定したルールファイルを置いています。
+試験ガイドでは、`.claude/rules/` 配下のルールファイルは YAML フロントマターの
+**`paths`** フィールド(glob パターンの配列)で適用対象を指定し、編集中のファイルが
+マッチするときだけそのルールがロードされる、とされています
+(例: `paths: ["terraform/**/*"]`, `paths: ["src/api/**/*"]`, `paths: ["**/*.test.*"]`)。
+本サンプルはこの `paths` フィールドをそのまま使っています(`globs` ではありません)。
 
 ```bash
 python3 03_rules_glob/rules_loader.py
 ```
 
-デフォルトでは以下5つのファイルパスに対して、どのルールが適用されるかを判定します。
+デフォルトでは以下6つのファイルパスに対して、どのルールが適用されるかを判定します。
 
 | 対象ファイル | 期待される適用ルール |
 |---|---|
 | `src/app.py` | `always-security.md`, `python-style.md` |
 | `docs/README.md` | `always-security.md`, `docs-style.md` |
-| `src/components/Button.tsx` | `always-security.md`, `frontend-style.md` |
-| `src/style.css` | `always-security.md`, `frontend-style.md` |
-| `notes.txt` | `always-security.md` のみ(他のどの glob にもマッチしない) |
+| `src/api/users.py` | `always-security.md`, `api-conventions.md`, `python-style.md` |
+| `src/api/v1/orders.py` | `always-security.md`, `api-conventions.md`, `python-style.md` |
+| `src/components/Button.test.tsx` | `always-security.md`, `testing.md` |
+| `notes.txt` | `always-security.md` のみ(他のどの `paths` glob にもマッチしない) |
 
 **確認ポイント:**
 - `always-security.md` は `alwaysApply: true` のため、**すべての**対象ファイルで
-  適用ルールに含まれること。
-- `python-style.md`(`globs: ["**/*.py"]`)は `.py` ファイルのときだけ適用されること。
-- `notes.txt` のようにどの glob にもマッチしないファイルでは、`always-security.md`
+  適用ルールに含まれること(Task 3.1 の「.claude/rules/ をモノリシックなCLAUDE.mdの
+  代替として使う」という文脈での常時適用ルールに相当)。
+- `python-style.md`(`paths: ["**/*.py"]`)は `.py` ファイルのときだけ適用されること。
+- `api-conventions.md`(`paths: ["src/api/**/*"]`)は `src/api/users.py` のように
+  ディレクトリ直下のファイルにも、`src/api/v1/orders.py` のように深い階層のファイルにも
+  マッチすること(`**` が0階層以上のディレクトリにマッチする glob の標準的な挙動を
+  正しく再現している点を、`rules_loader.py` の `_glob_to_regex()` で確認してください)。
+- `notes.txt` のようにどの `paths` にもマッチしないファイルでは、`always-security.md`
   以外のルールが1つも適用されないこと。
 - 任意のファイルパスを渡して、狙い通りマッチ/非マッチになるかも試してください:
   ```bash
   python3 03_rules_glob/rules_loader.py src/foo.py src/foo.rb docs/spec.md
   ```
-  (`.rb` は `python-style.md`/`docs-style.md`/`frontend-style.md` のどの glob にも
-  一致しないため、`alwaysApply: true` の `always-security.md` のみが適用されることを確認)
-- `rules_loader.py` の `Rule.matches()` で、`/` を含む glob はパス全体に、
-  含まない glob はファイル名(basename)にマッチさせている実装も合わせて確認してください。
+  (`.rb` は `python-style.md`/`docs-style.md`/`api-conventions.md`/`testing.md` の
+  どの `paths` にも一致しないため、`alwaysApply: true` の `always-security.md` のみが
+  適用されることを確認)
 
 ---
 
 ### ④ tool_use + JSON スキーマの確かめ方
 
 対象: `ccarf_sample/04_tool_use_schema/tool_use_demo.py`
+対応: **Task Statement 4.3**「Enforce structured output using tool use and JSON schemas」、
+**Task Statement 4.4**「Implement validation, retry, and feedback loops for extraction quality」
 
-Claude にツールを渡す際は `input_schema` に JSON Schema を指定します。Claude は
-その Schema に従った引数を組み立てて `tool_use` ブロックとして返すため、
-受け取った側でも同じ Schema でバリデーションするのが安全です。
+Claude にツールを渡す際は `input_schema` に JSON Schema を指定します。試験ガイドは
+tool_use + JSON Schema を「JSON構文エラーを排除する最も信頼できる方法」としつつ、
+「値の整合性のような意味的エラーまでは防げない」点を明確に区別しています。
 
 ```bash
 python3 04_tool_use_schema/tool_use_demo.py
@@ -142,16 +176,29 @@ python3 04_tool_use_schema/tool_use_demo.py
 
 **確認ポイント:**
 - `=== ① ツール定義 (JSON Schema) ===` に、`create_support_ticket` ツールの
-  `input_schema`(`type: object`、`required: [title, priority]`、
+  `input_schema`(`type: object`、`required: [title, priority, category]`、
   `priority` は `enum` で3値に制限、`additionalProperties: false`)が
   そのまま JSON として表示されること。
-- `=== ② 正常系 ===` では、スキーマに適合する `input`(`title`, `priority`, `tags` あり)
-  が `handle_tool_use()` を通過し、`result` にチケット情報が生成されること。
-- `=== ③ 異常系 ===` では、次の3パターンすべてで `ValidationError` が発生すること:
+- `=== ② 正常系 ===` では、スキーマに適合する `input` が `handle_tool_use()` を
+  通過し、`result` にチケット情報が生成されること。
+- `=== ③ enum + 'other' + detail パターン ===` では、`category: "other"` +
+  `category_detail` という、あらかじめ列挙しきれない分類を拡張可能にするパターン
+  (試験ガイド Task 4.3 の「enum fields with 'other' + detail string patterns for
+  extensible categories」)が通ることを確認してください。
+- `=== ④ 異常系 ===` では、次の3パターンすべてで `ValidationError` が発生すること:
   1. `priority` が `enum` に無い値(`"urgent"`) → `'urgent' is not one of [...]`
   2. 必須項目 `title` が欠けている → `'title' is a required property`
   3. スキーマに無い余計なフィールドを含む(`additionalProperties: false` 違反)
      → `Additional properties are not allowed (...)`
+- `=== ⑤ tool_choice の3モード ===` で、`"auto"`(モデルがツール呼び出しかテキストかを
+  選べる)、`"any"`(必ず何らかのツールを呼ぶ)、`{"type": "tool", "name": "..."}`
+  (指定したツールを強制)の違いが説明付きで表示されることを確認してください。
+- `=== ⑥ スキーマは通るが意味的には誤っているケース ===` が本項目の核心です。
+  `quantity: 3, unit_price: 100, total_price: 500`(本来は300のはず)という
+  入力に対して、`JSON Schema バリデーション: OK` と表示された**直後に**
+  「意味的には誤り」という警告が出ることを確認してください。これは
+  tool_use + JSON Schema が構文エラーは防げても意味的エラーは防げないという、
+  試験ガイドが明示する重要なポイントを再現したものです。
 - `--live` オプション + `ANTHROPIC_API_KEY` があれば、実際に Claude が
   自然文のリクエストから `tool_use.input` を組み立てる様子と、
   それが同じ JSON Schema でそのままバリデーションできることを確認できます:

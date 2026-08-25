@@ -1,11 +1,13 @@
-"""claude/rules/ 配下のルールファイルを、glob パターンで対象ファイルに
-適用するかどうか判定するサンプル。
+"""claude/rules/ 配下のルールファイルを、YAML フロントマターの paths フィールド
+(グロブパターン)で対象ファイルに適用するかどうか判定するサンプル。
 
-各ルールファイルは Markdown + フロントマター(YAML風のヘッダ)で構成する。
+これは CCAR-F (Claude Certification Program: Architect Foundations) の
+Task Statement 3.3「Apply path-specific rules for conditional convention
+loading」に対応する。各ルールファイルは Markdown + フロントマターで構成する。
 
     ---
     description: ルールの説明
-    globs:
+    paths:
       - "**/*.py"
     alwaysApply: false
     ---
@@ -13,13 +15,18 @@
 
 判定ロジック:
   - alwaysApply: true のルールは、対象ファイルに関わらず常に適用される
-  - それ以外は globs のいずれかのパターンにマッチしたときだけ適用される
-    - パターンに "/" が含まれる場合はファイルの相対パス全体に対して照合
-    - "/" を含まないパターン(例: "*.py")はファイル名(basename)に対して照合
+  - それ以外は paths のいずれかのグロブパターンにマッチしたときだけ適用される
+    (= 「編集中のファイルにマッチするときだけロードされる」ことで、無関係な
+    コンテキストとトークン消費を減らせる、というのが試験ガイドの主張)
+
+グロブは "**" (0階層以上のディレクトリにマッチ) をサポートする:
+    "**/*.py"       -> トップレベルの app.py にも、src/a/b.py にもマッチ
+    "src/api/**/*"  -> src/api/users.py にも、src/api/v1/users.py にもマッチ
+Python 標準の fnmatch は "**" を特別扱いしないため、ここでは "**" を含む
+グロブを正しく解釈する簡易的な glob -> 正規表現変換を自前で実装している。
 """
 from __future__ import annotations
 
-import fnmatch
 import re
 import sys
 from dataclasses import dataclass
@@ -27,12 +34,34 @@ from pathlib import Path
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 
+# "**/" -> 0階層以上のディレクトリ(末尾の / 込み)
+# "/**" -> "/" 以降が0文字以上の任意の文字列
+# "**"  -> 任意の文字列(/ を含む)
+# "*"   -> "/" を含まない任意の文字列
+# "?"   -> "/" を含まない任意の1文字
+_GLOB_TOKEN_RE = re.compile(r"(\*\*/|/\*\*|\*\*|\*|\?)")
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    pattern = pattern.replace("\\", "/")
+    regex = "".join(
+        {
+            "**/": "(?:.*/)?",
+            "/**": "(?:/.*)?",
+            "**": ".*",
+            "*": "[^/]*",
+            "?": "[^/]",
+        }.get(tok, re.escape(tok))
+        for tok in _GLOB_TOKEN_RE.split(pattern)
+    )
+    return re.compile(f"^{regex}$")
+
 
 @dataclass
 class Rule:
     path: Path
     description: str
-    globs: list[str]
+    paths: list[str]
     always_apply: bool
     body: str
 
@@ -40,15 +69,7 @@ class Rule:
         if self.always_apply:
             return True
         target = target_path.replace("\\", "/")
-        basename = target.rsplit("/", 1)[-1]
-        for pattern in self.globs:
-            if "/" in pattern:
-                if fnmatch.fnmatch(target, pattern):
-                    return True
-            else:
-                if fnmatch.fnmatch(basename, pattern):
-                    return True
-        return False
+        return any(_glob_to_regex(pattern).match(target) for pattern in self.paths)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -86,7 +107,7 @@ def load_rules(rules_dir: Path) -> list[Rule]:
             Rule(
                 path=md_path,
                 description=meta.get("description", ""),
-                globs=meta.get("globs", []),
+                paths=meta.get("paths", []),
                 always_apply=bool(meta.get("alwaysApply", False)),
                 body=body,
             )
@@ -104,14 +125,17 @@ def main() -> None:
 
     print(f"claude/rules/ から読み込んだルール: {len(rules)} 件")
     for r in rules:
-        print(f"  - {r.path.name}: description={r.description!r} globs={r.globs} alwaysApply={r.always_apply}")
+        print(f"  - {r.path.name}: description={r.description!r} paths={r.paths} alwaysApply={r.always_apply}")
     print()
 
+    # 試験ガイド Exercise 2 の例 (paths: ["src/api/**/*"], paths: ["**/*.test.*"]) を
+    # 実際にマッチさせて確認できるよう、対象ファイルを選んでいる
     targets = sys.argv[1:] or [
         "src/app.py",
         "docs/README.md",
-        "src/components/Button.tsx",
-        "src/style.css",
+        "src/api/users.py",
+        "src/api/v1/orders.py",
+        "src/components/Button.test.tsx",
         "notes.txt",
     ]
     for target in targets:

@@ -18,6 +18,15 @@
             "command": "python3 $CLAUDE_PROJECT_DIR/02_hook_block/pretooluse_guard.py"
           }
         ]
+      },
+      {
+        "matcher": "process_refund",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $CLAUDE_PROJECT_DIR/02_hook_block/pretooluse_guard.py"
+          }
+        ]
       }
     ]
   }

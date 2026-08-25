@@ -1,5 +1,9 @@
 """stop_reason のループ(エージェントループ)を体験するサンプル。
 
+CCAR-F (Claude Certification Program: Architect Foundations) の
+Task Statement 1.1「Design and implement agentic loops for autonomous task
+execution」に対応する。
+
 Claude のような LLM API は「1回の呼び出しで会話が完結するとは限らない」。
 レスポンスに含まれる ``stop_reason`` を見て、呼び出し側が次にすべきことを
 判断し、必要なら再度 API を呼び出す ―― これが agentic loop の核心。
@@ -9,6 +13,14 @@ Claude のような LLM API は「1回の呼び出しで会話が完結すると
     stop_reason == "end_turn"      -> モデルが最終回答を返した(ループ終了)
     stop_reason == "max_tokens"    -> トークン上限で打ち切られた
     stop_reason == "stop_sequence" -> 指定した停止文字列に到達した
+
+試験ガイドが明示するアンチパターン(避けるべき実装)にも注意:
+  - 自然言語のテキストを解析してループ終了を判断すること(NG)
+  - イテレーション回数の上限を「主たる」停止判断に使うこと(NG。あくまで
+    無限ループ防止の安全弁であるべきで、正しい停止判断は必ず stop_reason)
+  - アシスタントの text コンテンツの有無を完了判定に使うこと(NG)
+このサンプルの run_agent_loop() は、あくまで stop_reason だけで継続/終了を
+判断し、MAX_ITERATIONS は異常系のフェイルセーフとしてのみ使っている。
 
 このスクリプトは以下の2モードで動く。
 
